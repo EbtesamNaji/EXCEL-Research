@@ -1,0 +1,32 @@
+name: Run Original Simulink Model
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-simulink:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up MATLAB and Simulink
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          products: Simulink
+
+      - name: Run original EXCEL-Research model
+        uses: matlab-actions/run-command@v3
+        with:
+          command: >
+            cd('LADRC');
+            pneumatic_code;
+            save('GITHUB_SIMULINK_RESULTS.mat');
+
+      - name: Upload simulation results
+        uses: actions/upload-artifact@v4
+        with:
+          name: EXCEL-Research-Simulink-Results
+          path: LADRC/GITHUB_SIMULINK_RESULTS.mat
+          if-no-files-found: error
