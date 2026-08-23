@@ -1,4 +1,4 @@
-name: Run Original Simulink Model
+name: Run Simulink and Log ADRC Output
 
 on:
   workflow_dispatch:
@@ -16,17 +16,77 @@ jobs:
         with:
           products: Simulink
 
-      - name: Run original EXCEL-Research model
+      - name: Run model and record real controller output
         uses: matlab-actions/run-command@v3
         with:
           command: >
             cd('LADRC');
-            pneumatic_code;
-            save('GITHUB_SIMULINK_RESULTS.mat');
+            code=fileread('pneumatic_code.m');
+            code=strrep(code,"sim('pneumatic04212025');","% simulation moved to logger");
+            fid=fopen('pneumatic_params_only.m','w');
+            fwrite(fid,code);
+            fclose(fid);
+            pneumatic_params_only;
+            mdl='pneumatic04212025';
+            load_system(mdl);
+            add_block('simulink/Sinks/To Workspace',[mdl '/LOG_u_actual'],
+            'VariableName','u_actual_log',
+            'SaveFormat','Structure With Time',
+            'MaxDataPoints','inf',
+            'Position',[1010 480 1130 510]);
+            add_line(mdl,'Manual Switch/1','LOG_u_actual/1','autorouting','on');
+            add_block('simulink/Sinks/To Workspace',[mdl '/LOG_u_controller'],
+            'VariableName','u_controller_log',
+            'SaveFormat','Structure With Time',
+            'MaxDataPoints','inf',
+            'Position',[900 500 1020 530]);
+            add_line(mdl,'Subsystem1/1','LOG_u_controller/1','autorouting','on');
+            add_block('simulink/Sinks/To Workspace',[mdl '/LOG_xs_actual'],
+            'VariableName','xs_actual_log',
+            'SaveFormat','Structure With Time',
+            'MaxDataPoints','inf',
+            'Position',[1280 480 1400 510]);
+            add_line(mdl,'Spool Dynamics/1','LOG_xs_actual/1','autorouting','on');
+            out_logged=sim(mdl);
+            ua=out_logged.get('u_actual_log');
+            uc=out_logged.get('u_controller_log');
+            xx=out_logged.get('xs_actual_log');
+            u_actual_time=ua.time;
+            u_actual=squeeze(ua.signals.values);
+            u_controller_time=uc.time;
+            u_controller=squeeze(uc.signals.values);
+            xs_time=xx.time;
+            xs_actual=squeeze(xx.signals.values);
+            u_actual_min=min(u_actual(:));
+            u_actual_max=max(u_actual(:));
+            u_actual_maxabs=max(abs(u_actual(:)));
+            u_controller_min=min(u_controller(:));
+            u_controller_max=max(u_controller(:));
+            xs_min=min(xs_actual(:));
+            xs_max=max(xs_actual(:));
+            fid=fopen('GITHUB_U_LOG_SUMMARY.txt','w');
+            fprintf(fid,'Actual control output sent to Spool Dynamics\n');
+            fprintf(fid,'u_actual_min = %.15g\n',u_actual_min);
+            fprintf(fid,'u_actual_max = %.15g\n',u_actual_max);
+            fprintf(fid,'u_actual_maxabs = %.15g\n',u_actual_maxabs);
+            fprintf(fid,'Subsystem1_min = %.15g\n',u_controller_min);
+            fprintf(fid,'Subsystem1_max = %.15g\n',u_controller_max);
+            fprintf(fid,'spool_xs_min = %.15g\n',xs_min);
+            fprintf(fid,'spool_xs_max = %.15g\n',xs_max);
+            fclose(fid);
+            save('GITHUB_U_LOG_RESULTS.mat',
+            'u_actual_time','u_actual',
+            'u_controller_time','u_controller',
+            'xs_time','xs_actual',
+            'u_actual_min','u_actual_max','u_actual_maxabs',
+            'u_controller_min','u_controller_max',
+            'xs_min','xs_max','-v7');
 
-      - name: Upload simulation results
+      - name: Upload exact controller results
         uses: actions/upload-artifact@v4
         with:
-          name: EXCEL-Research-Simulink-Results
-          path: LADRC/GITHUB_SIMULINK_RESULTS.mat
+          name: EXCEL-Research-ADRC-U-Results
+          path: |
+            LADRC/GITHUB_U_LOG_RESULTS.mat
+            LADRC/GITHUB_U_LOG_SUMMARY.txt
           if-no-files-found: error
